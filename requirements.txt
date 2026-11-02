@@ -1,0 +1,13 @@
+# PP-YOLOE-Lite-Train Dependencies
+pyyaml>=5.3.1
+opencv-python>=4.5.0
+matplotlib>=3.3.0
+numpy>=1.20.0,<2.0.0
+pycocotools>=2.0.2
+lapx>=0.5.2
+Cython
+tqdm
+requests
+onnx>=1.12.0
+onnxruntime>=1.12.0
+uv

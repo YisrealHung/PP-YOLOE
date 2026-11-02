@@ -1,0 +1,50 @@
+# Checkpoints & Weights
+*.pdparams
+*.pdopt
+*.pdmodel
+*.pdiparams
+*.pt
+*.pth
+*.weights
+
+# Model Exports
+*.onnx
+*.engine
+*.plan
+*.trt
+
+# Datasets & Archives
+*.zip
+*.tar
+*.tar.gz
+*.7z
+dataset/
+raw_dataset/
+custom_dataset/
+
+# Outputs & Runs
+output/
+runs/
+work_dirs/
+_infer_output/
+test_results/
+
+# Cache & Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+.pytest_cache/
+.env
+.venv
+env/
+venv/
+cache/
+
+# Logs
+*.log
+train_log.txt
+
+# OS Files
+.DS_Store
+Thumbs.db
