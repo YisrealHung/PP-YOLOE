@@ -1,6 +1,7 @@
 # 🚀 PP-YOLOE-Lite-Train (含 NVIDIA Jetson Orin TensorRT 極速部署)
 
 > 專為 **Google Colab (T4 GPU)** 與 **NVIDIA Jetson Orin NX / Nano** 深度優化之 PP-YOLOE+ 極速訓練與部署套件。  
+> 專案開源於：**https://github.com/YisrealHung/PP-YOLOE**  
 > 融合 **PP-YOLOE-R 旋轉框的精準架構設計** 與 **DAMO-YOLO-Lite-Train 記憶體 Byte-Cache 技術**，將原本 2~3 小時的訓練時間驟降至 **15~20 分鐘**！
 
 ---
@@ -87,8 +88,8 @@ git commit -m "feat: initial commit for PP-YOLOE-Lite-Train with PP-YOLOE-R acce
 # 5. 將預設分支命名為 main
 git branch -M main
 
-# 6. 關聯到您的 GitHub 倉庫 (請替換為您建立的 GitHub URL)
-git remote add origin https://github.com/YisrealHung/PP-YOLOE-Lite-Train.git
+# 6. 關聯到您的 GitHub 倉庫 (請確認倉庫名稱)
+git remote add origin https://github.com/YisrealHung/PP-YOLOE.git
 
 # 7. 推送至 GitHub
 git push -u origin main
@@ -125,3 +126,4 @@ python3 jetson_infer.py --engine ppyoloe_plus_s_640.engine --source 0 --show
 # 單張圖片或資料夾批次推論
 python3 jetson_infer.py --engine ppyoloe_plus_s_640.engine --source test.jpg --save-dir results
 ```
+

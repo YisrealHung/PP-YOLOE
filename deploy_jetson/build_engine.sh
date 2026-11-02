@@ -49,3 +49,4 @@ else
     echo "❌ Engine build failed. Please check log messages."
     exit 1
 fi
+

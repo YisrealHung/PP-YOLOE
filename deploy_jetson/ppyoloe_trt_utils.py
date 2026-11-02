@@ -105,3 +105,4 @@ try:
             return [out['host'].reshape(out['shape']) for out in self.outputs]
 except ImportError:
     pass
+

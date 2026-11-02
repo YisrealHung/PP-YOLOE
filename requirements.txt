@@ -11,3 +11,4 @@ requests
 onnx>=1.12.0
 onnxruntime>=1.12.0
 uv
+
