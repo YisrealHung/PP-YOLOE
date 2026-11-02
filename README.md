@@ -68,35 +68,6 @@ PP-YOLOE-Lite-Train/
 
 ---
 
-## 📤 如何將本專案推送到自己的 GitHub？
-
-如果您在 GitHub 上建立了一個新倉庫（例如 `https://github.com/YisrealHung/PP-YOLOE-Lite-Train`），請在終端機（PowerShell 或 CMD）中切換至本專案目錄執行：
-
-```bash
-# 1. 切換至本專案目錄
-cd c:\Users\icshop.edu4\Desktop\PP-YOLOE\PP-YOLOE-Lite-Train
-
-# 2. 初始化 Git 倉庫 (若尚未初始化)
-git init
-
-# 3. 將所有檔案加入暫存區
-git add .
-
-# 4. 提交版本
-git commit -m "feat: initial commit for PP-YOLOE-Lite-Train with PP-YOLOE-R acceleration & RAM cache"
-
-# 5. 將預設分支命名為 main
-git branch -M main
-
-# 6. 關聯到您的 GitHub 倉庫 (請確認倉庫名稱)
-git remote add origin https://github.com/YisrealHung/PP-YOLOE.git
-
-# 7. 推送至 GitHub
-git push -u origin main
-```
-
----
-
 ## 🤖 NVIDIA Jetson Orin NX (TensorRT) 實機部署指南
 
 訓練完成後，Colab 會在 Google Drive 的 `ppyoloe_runs/<專案名稱>/export/` 產生專屬部署包。
