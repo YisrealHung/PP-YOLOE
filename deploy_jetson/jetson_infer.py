@@ -29,6 +29,9 @@ def parse_args():
     parser.add_argument('--cuda-pre', action='store_true', help='Enable PyTorch GPU accelerated preprocessing (much faster)')
     parser.add_argument('--warmup', type=int, default=3, help='Warmup iterations for accurate benchmark (default 3)')
     parser.add_argument('--show', action='store_true', help='Display real-time window')
+    parser.add_argument('--cam-fps', type=int, default=30, help='Camera requested FPS (default 30)')
+    parser.add_argument('--cam-width', type=int, default=1280, help='Camera width (default 1280)')
+    parser.add_argument('--cam-height', type=int, default=720, help='Camera height (default 720)')
     return parser.parse_args()
 
 def main():
@@ -58,7 +61,21 @@ def main():
 
     if is_cam or is_video:
         src = int(args.source) if is_cam else args.source
-        cap = cv2.VideoCapture(src)
+        if is_cam:
+            # 優先使用 V4L2 後端以消除 GStreamer 警告與協商延遲
+            cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
+            if not cap.isOpened():
+                cap = cv2.VideoCapture(src)
+            # 強制開啟 MJPG 格式以釋放 USB 頻寬，解鎖 30 FPS 硬體上限
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.cam_width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.cam_height)
+            cap.set(cv2.CAP_PROP_FPS, args.cam_fps)
+            # 關閉緩衝區排隊 (避免延遲堆積)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        else:
+            cap = cv2.VideoCapture(src)
+
         if not cap.isOpened():
             print(f"❌ Failed to open source: {args.source}")
             return
