@@ -33,8 +33,9 @@ def parse_args():
     parser.add_argument('--warmup', type=int, default=3, help='Warmup iterations for accurate benchmark (default 3)')
     parser.add_argument('--show', action='store_true', help='Display real-time window')
     parser.add_argument('--cam-fps', type=int, default=30, help='Camera requested FPS (default 30)')
-    parser.add_argument('--cam-width', type=int, default=1280, help='Camera width (default 1280)')
-    parser.add_argument('--cam-height', type=int, default=720, help='Camera height (default 720)')
+    parser.add_argument('--cam-width', type=int, default=640, help='Camera width (default 640)')
+    parser.add_argument('--cam-height', type=int, default=480, help='Camera height (default 480)')
+    parser.add_argument('--cam-fourcc', type=str, default='YUYV', choices=['YUYV', 'MJPG'], help='Camera pixel format (YUYV or MJPG)')
     return parser.parse_args()
 
 def main():
@@ -65,12 +66,19 @@ def main():
     if is_cam or is_video:
         src = int(args.source) if is_cam else args.source
         if is_cam:
+            # 優先嘗試透過 v4l2-ctl 關閉相機弱光自動降頻 (保證滿 30 FPS)
+            try:
+                os.system(f"v4l2-ctl -d /dev/video{src} -c exposure_auto_priority=0 > /dev/null 2>&1")
+            except Exception:
+                pass
+
             # 優先使用 V4L2 後端以消除 GStreamer 警告與協商延遲
             cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
             if not cap.isOpened():
                 cap = cv2.VideoCapture(src)
-            # 強制開啟 MJPG 格式以釋放 USB 頻寬，解鎖 30 FPS 硬體上限
-            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            # 設定像素格式 (YUYV 或 MJPG)
+            fourcc = cv2.VideoWriter_fourcc(*args.cam_fourcc)
+            cap.set(cv2.CAP_PROP_FOURCC, fourcc)
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.cam_width)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.cam_height)
             cap.set(cv2.CAP_PROP_FPS, args.cam_fps)
