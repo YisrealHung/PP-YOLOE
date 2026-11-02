@@ -16,6 +16,9 @@ import cv2
 import numpy as np
 import ppyoloe_trt_utils as U
 
+# 抑制 OpenCV/libjpeg 警告訊息
+os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Jetson PP-YOLOE+ TensorRT Inference')
     parser.add_argument('--engine', type=str, required=True, help='Path to TensorRT .engine file')
