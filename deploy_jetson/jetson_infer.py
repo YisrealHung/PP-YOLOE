@@ -63,31 +63,62 @@ def main():
             print(f"❌ Failed to open source: {args.source}")
             return
         print("🎥 Streaming started (Press 'q' to quit)...")
-        fps_list = []
+        stream_fps_list = []
+        algo_time_list = []
+        draw_time_list = []
+        total_time_list = []
+        
         while True:
+            t_frame_start = time.perf_counter()
             ret, frame = cap.read()
             if not ret:
                 break
-            t0 = time.perf_counter()
+            t_cap_end = time.perf_counter()
+            
+            # 1. 演算法推論階段 (預處理 + TRT 推論 + NMS 後處理)
             inp, sf = preproc_fn(frame, img_size)
             outs = engine.infer(inp, sf)
             boxes, scores, cls_ids = U.postprocess(outs[0], outs[1], conf_thresh=args.conf, iou_thresh=args.iou)
-            t1 = time.perf_counter()
-            fps = 1.0 / max(1e-5, (t1 - t0))
-            fps_list.append(fps)
-            if len(fps_list) > 30:
-                fps_list.pop(0)
-            avg_fps = sum(fps_list) / len(fps_list)
+            t_algo_end = time.perf_counter()
 
+            # 2. 繪製 BBox 階段
             vis = U.draw(frame, boxes, scores, cls_ids, class_names)
-            cv2.putText(vis, f"FPS: {avg_fps:.1f} | Detections: {len(boxes)}", (15, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            t_draw_end = time.perf_counter()
+
+            # 計算各階段耗時 (ms)
+            dt_cap = (t_cap_end - t_frame_start) * 1000
+            dt_algo = (t_algo_end - t_cap_end) * 1000
+            dt_draw = (t_draw_end - t_algo_end) * 1000
+            dt_total = (t_draw_end - t_frame_start) * 1000
             
-            # 如果沒有接螢幕 (Headless)，每 30 幀在終端機印出即時 FPS
-            if not args.show:
-                if len(fps_list) % 30 == 0:
-                    print(f"⚡ Streaming: {avg_fps:.1f} FPS | Detections: {len(boxes)}")
-            else:
+            algo_time_list.append(dt_algo)
+            draw_time_list.append(dt_draw)
+            total_time_list.append(dt_total)
+            stream_fps = 1.0 / max(1e-5, (t_draw_end - t_frame_start))
+            stream_fps_list.append(stream_fps)
+            
+            if len(stream_fps_list) > 30:
+                stream_fps_list.pop(0)
+                algo_time_list.pop(0)
+                draw_time_list.pop(0)
+                total_time_list.pop(0)
+
+            avg_fps = sum(stream_fps_list) / len(stream_fps_list)
+            avg_algo = sum(algo_time_list) / len(algo_time_list)
+            avg_draw = sum(draw_time_list) / len(draw_time_list)
+            avg_total = sum(total_time_list) / len(total_time_list)
+
+            # 在畫面上繪製即時詳細資訊
+            cv2.putText(vis, f"Cam FPS: {avg_fps:.1f} | Algo: {avg_algo:.1f}ms (TRT+NMS) | Draw: {avg_draw:.1f}ms", 
+                        (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+            cv2.putText(vis, f"Total Pipeline: {avg_total:.1f}ms | Detections: {len(boxes)}", 
+                        (15, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+
+            # 終端機即時輸出各階段細項耗時 (每 30 幀更新一次)
+            if len(stream_fps_list) % 30 == 0:
+                print(f"⚡ [Stream FPS: {avg_fps:4.1f}] 演算法推論: {avg_algo:5.1f} ms | 繪製Bbox: {avg_draw:4.1f} ms | 總處理時間: {avg_total:5.1f} ms | 偵測數: {len(boxes)}")
+
+            if args.show:
                 cv2.imshow('Jetson PP-YOLOE-Lite', vis)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
