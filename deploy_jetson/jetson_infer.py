@@ -28,6 +28,7 @@ def parse_args():
     parser.add_argument('--benchmark', action='store_true', help='Print detailed stage-by-stage timing profile')
     parser.add_argument('--cuda-pre', action='store_true', help='Enable PyTorch GPU accelerated preprocessing (much faster)')
     parser.add_argument('--warmup', type=int, default=3, help='Warmup iterations for accurate benchmark (default 3)')
+    parser.add_argument('--show', action='store_true', help='Display real-time window')
     return parser.parse_args()
 
 def main():
@@ -68,7 +69,7 @@ def main():
             if not ret:
                 break
             t0 = time.perf_counter()
-            inp, sf = U.preprocess(frame, img_size)
+            inp, sf = preproc_fn(frame, img_size)
             outs = engine.infer(inp, sf)
             boxes, scores, cls_ids = U.postprocess(outs[0], outs[1], conf_thresh=args.conf, iou_thresh=args.iou)
             t1 = time.perf_counter()
@@ -81,7 +82,12 @@ def main():
             vis = U.draw(frame, boxes, scores, cls_ids, class_names)
             cv2.putText(vis, f"FPS: {avg_fps:.1f} | Detections: {len(boxes)}", (15, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-            if args.show:
+            
+            # 如果沒有接螢幕 (Headless)，每 30 幀在終端機印出即時 FPS
+            if not args.show:
+                if len(fps_list) % 30 == 0:
+                    print(f"⚡ Streaming: {avg_fps:.1f} FPS | Detections: {len(boxes)}")
+            else:
                 cv2.imshow('Jetson PP-YOLOE-Lite', vis)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
