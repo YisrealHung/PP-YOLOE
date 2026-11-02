@@ -12,12 +12,64 @@ import argparse
 import json
 import os
 import time
+import threading
 import cv2
 import numpy as np
 import ppyoloe_trt_utils as U
 
 # 抑制 OpenCV/libjpeg 警告訊息
 os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+
+class AsyncVideoCapture:
+    """
+    非同步多執行緒相機讀取器 (Async Camera Streamer)
+    在獨立後台執行緒持續讀取相機最新幀，消除 cap.read() 阻塞等待時間！
+    """
+    def __init__(self, src, width=640, height=480, fps=30, fourcc='YUYV'):
+        # 優先嘗試透過 v4l2-ctl 關閉相機弱光自動降頻
+        try:
+            os.system(f"v4l2-ctl -d /dev/video{src} -c exposure_dynamic_framerate=0 > /dev/null 2>&1")
+        except Exception:
+            pass
+
+        self.cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
+        if not self.cap.isOpened():
+            self.cap = cv2.VideoCapture(src)
+            
+        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc))
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        self.cap.set(cv2.CAP_PROP_FPS, fps)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        self.ret, self.frame = self.cap.read()
+        self.running = True
+        self.lock = threading.Lock()
+        self.thread = threading.Thread(target=self._update, daemon=True)
+        self.thread.start()
+
+    def _update(self):
+        while self.running:
+            ret, frame = self.cap.read()
+            if not ret:
+                time.sleep(0.005)
+                continue
+            with self.lock:
+                self.ret = ret
+                self.frame = frame
+
+    def read(self):
+        with self.lock:
+            return self.ret, (self.frame.copy() if self.frame is not None else None)
+
+    def isOpened(self):
+        return self.cap.isOpened()
+
+    def release(self):
+        self.running = False
+        if self.thread.is_alive():
+            self.thread.join(timeout=1.0)
+        self.cap.release()
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Jetson PP-YOLOE+ TensorRT Inference')
@@ -66,24 +118,13 @@ def main():
     if is_cam or is_video:
         src = int(args.source) if is_cam else args.source
         if is_cam:
-            # 優先嘗試透過 v4l2-ctl 關閉相機弱光自動降頻 (保證滿 30 FPS)
-            try:
-                os.system(f"v4l2-ctl -d /dev/video{src} -c exposure_auto_priority=0 > /dev/null 2>&1")
-            except Exception:
-                pass
-
-            # 優先使用 V4L2 後端以消除 GStreamer 警告與協商延遲
-            cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(src)
-            # 設定像素格式 (YUYV 或 MJPG)
-            fourcc = cv2.VideoWriter_fourcc(*args.cam_fourcc)
-            cap.set(cv2.CAP_PROP_FOURCC, fourcc)
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.cam_width)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.cam_height)
-            cap.set(cv2.CAP_PROP_FPS, args.cam_fps)
-            # 關閉緩衝區排隊 (避免延遲堆積)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap = AsyncVideoCapture(
+                src=src,
+                width=args.cam_width,
+                height=args.cam_height,
+                fps=args.cam_fps,
+                fourcc=args.cam_fourcc
+            )
         else:
             cap = cv2.VideoCapture(src)
 
