@@ -32,8 +32,16 @@ def postprocess(pred_bboxes, pred_scores, conf_thresh=0.35, iou_thresh=0.45):
     pred_bboxes: [1, N, 4] -> (x1, y1, x2, y2)
     pred_scores: [1, C, N] -> Class scores
     """
-    bboxes = pred_bboxes[0]
-    scores = pred_scores[0].T  # [N, C]
+    # 確保維度正確 (部分 TRT 輸出可能為 [N, 4] 或 [1, N, 4])
+    if pred_bboxes.ndim == 3:
+        bboxes = pred_bboxes[0]
+    else:
+        bboxes = pred_bboxes
+
+    if pred_scores.ndim == 3:
+        scores = pred_scores[0].T  # [C, N] -> [N, C]
+    else:
+        scores = pred_scores.T if pred_scores.shape[0] < pred_scores.shape[1] else pred_scores
     
     max_scores = np.max(scores, axis=-1)
     class_ids = np.argmax(scores, axis=-1)
@@ -51,14 +59,19 @@ def postprocess(pred_bboxes, pred_scores, conf_thresh=0.35, iou_thresh=0.45):
     boxes_wh[:, 3] = boxes_wh[:, 3] - boxes_wh[:, 1]
     
     indices = cv2.dnn.NMSBoxes(boxes_wh.tolist(), filtered_scores.tolist(), conf_thresh, iou_thresh)
-    keep = [idx if isinstance(idx, int) else idx[0] for idx in indices]
+    
+    # 兼容 OpenCV 不同版本的 NMSBoxes 回傳格式 (二維陣列、一維陣列、或 tuple)
+    if indices is None or len(indices) == 0:
+        return np.empty((0, 4)), np.empty((0,)), np.empty((0,), dtype=int)
+        
+    keep = np.array(indices).reshape(-1)
     return filtered_boxes[keep], filtered_scores[keep], filtered_cls[keep]
 
 def draw(img_bgr, boxes, scores, cls_ids, class_names):
     vis = img_bgr.copy()
     for b, s, c in zip(boxes, scores, cls_ids):
         x1, y1, x2, y2 = map(int, b)
-        name = class_names[c] if c < len(class_names) else str(c)
+        name = class_names[c] if (class_names and c < len(class_names)) else str(c)
         label = f"{name} {s:.2f}"
         cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
         cv2.putText(vis, label, (x1, max(15, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
@@ -132,7 +145,6 @@ class TRTEngine:
                 dtype_np = trt.nptype(dtype_trt)
                 dtype_torch = torch.from_numpy(np.empty(0, dtype=dtype_np)).dtype
                 
-                # 直接在 GPU 顯存分配 Tensor，免去 pycuda 複雜指針管理
                 dev_tensor = torch.empty(shape, dtype=dtype_torch, device='cuda')
                 item = {
                     'name': name,
@@ -203,7 +215,6 @@ class TRTEngine:
         # ---------------------------------------------------------
         if self.backend == 'torch':
             with torch.cuda.stream(self.stream):
-                # 將 NumPy 陣列拷貝至已在 GPU 上的 Tensor (zero-allocation)
                 self.inputs[0]['tensor'].copy_(torch.from_numpy(img_tensor), non_blocking=True)
                 self.inputs[1]['tensor'].copy_(torch.from_numpy(scale_factor_tensor), non_blocking=True)
                 
