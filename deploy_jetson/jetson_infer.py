@@ -25,7 +25,8 @@ def parse_args():
     parser.add_argument('--conf', type=float, default=0.35, help='Confidence threshold (default 0.35)')
     parser.add_argument('--iou', type=float, default=0.45, help='NMS IoU threshold (default 0.45)')
     parser.add_argument('--save-dir', type=str, default='outputs', help='Directory to save output images')
-    parser.add_argument('--show', action='store_true', help='Display real-time window')
+    parser.add_argument('--benchmark', action='store_true', help='Print detailed stage-by-stage timing profile')
+    parser.add_argument('--warmup', type=int, default=3, help='Warmup iterations for accurate benchmark (default 3)')
     return parser.parse_args()
 
 def main():
@@ -101,15 +102,60 @@ def main():
     else:
         frame = cv2.imread(args.source)
         assert frame is not None, f"Failed to read image: {args.source}"
-        t0 = time.perf_counter()
+
+        # 預熱 (Warmup) 消除首次 CUDA Kernel JIT/配置延遲
+        if args.warmup > 0:
+            dummy_inp, dummy_sf = U.preprocess(frame, img_size)
+            for _ in range(args.warmup):
+                engine.infer(dummy_inp, dummy_sf)
+
+        t_total_start = time.perf_counter()
+
+        # 1. 預處理 (Preprocess: Resize, BGR2RGB, Norm, Transpose)
+        t_pre_start = time.perf_counter()
         inp, sf = U.preprocess(frame, img_size)
-        outs = engine.infer(inp, sf)
+        t_pre_end = time.perf_counter()
+
+        # 2. TensorRT 推論 (包含 Host->Device, GPU Kernel, Device->Host)
+        outs, trt_times = engine.infer(inp, sf, benchmark=True)
+        t_trt_end = time.perf_counter()
+
+        # 3. 後處理 (Postprocess: NMS, Score Filtering, Box Scaling)
         boxes, scores, cls_ids = U.postprocess(outs[0], outs[1], conf_thresh=args.conf, iou_thresh=args.iou)
-        dt = (time.perf_counter() - t0) * 1000
+        t_post_end = time.perf_counter()
+
+        # 4. 繪製與可視化 (Draw)
         vis = U.draw(frame, boxes, scores, cls_ids, class_names)
+        t_draw_end = time.perf_counter()
+
+        # 5. 檔案保存 (Save)
         save_p = os.path.join(args.save_dir, 'result.jpg')
         cv2.imwrite(save_p, vis)
-        print(f"✅ Inference complete: {dt:.2f} ms, detected {len(boxes)} objects, saved to {save_p}")
+        t_save_end = time.perf_counter()
+
+        dt_pre = (t_pre_end - t_pre_start) * 1000
+        dt_trt = (t_trt_end - t_pre_end) * 1000
+        dt_post = (t_post_end - t_trt_end) * 1000
+        dt_draw = (t_draw_end - t_post_end) * 1000
+        dt_save = (t_save_end - t_draw_end) * 1000
+        dt_pipeline = dt_pre + dt_trt + dt_post
+        dt_total = (t_save_end - t_total_start) * 1000
+
+        print(f"\n==================== ⏱️ 耗時細項分析 (Timing Profile) ====================")
+        print(f" 1. 影像預處理 (Preprocess, CPU)      : {dt_pre:6.2f} ms")
+        print(f" 2. TensorRT 引擎推論 (TRT Total)      : {dt_trt:6.2f} ms")
+        print(f"    ├─ 記憶體複製 CPU ➔ GPU (H2D)     : {trt_times['h2d']:6.2f} ms")
+        print(f"    ├─ GPU 核心推論 (CUDA Kernel)     : {trt_times['gpu']:6.2f} ms  (純 GPU 計算)")
+        print(f"    └─ 記憶體複製 GPU ➔ CPU (D2H)     : {trt_times['d2h']:6.2f} ms")
+        print(f" 3. 後處理與 NMS (Postprocess, CPU)    : {dt_post:6.2f} ms")
+        print(f" -------------------------------------------------------------------------")
+        print(f" 🚀 演算法總推論 (Pre + TRT + Post)   : {dt_pipeline:6.2f} ms  (相當於 {1000.0/max(1e-5, dt_pipeline):.1f} FPS)")
+        print(f" 4. 畫框與文字可視化 (Draw)            : {dt_draw:6.2f} ms")
+        print(f" 5. 磁碟寫入儲存 (Disk Save)           : {dt_save:6.2f} ms")
+        print(f" -------------------------------------------------------------------------")
+        print(f" 🏁 完整生命週期耗時 (End-to-End Total) : {dt_total:6.2f} ms")
+        print(f"==========================================================================")
+        print(f"✅ 偵測到 {len(boxes)} 個物件，成果圖已保存至: {save_p}\n")
 
 if __name__ == '__main__':
     main()

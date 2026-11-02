@@ -209,35 +209,58 @@ class TRTEngine:
                     self.outputs.append(item)
             print(f"⚡ [TensorRT] 引擎載入成功！使用 pycuda 管理 GPU 顯存")
 
-    def infer(self, img_tensor, scale_factor_tensor):
+    def infer(self, img_tensor, scale_factor_tensor, benchmark=False):
+        """
+        執行 TensorRT 推論
+        如果 benchmark=True，會同時回傳 (outputs, time_profile_dict)
+        """
+        import time
+        t_h2d, t_gpu, t_d2h = 0.0, 0.0, 0.0
+
         # ---------------------------------------------------------
         # PyTorch 推論：極速拷貝與非同步執行
         # ---------------------------------------------------------
         if self.backend == 'torch':
+            t0 = time.perf_counter()
             with torch.cuda.stream(self.stream):
                 self.inputs[0]['tensor'].copy_(torch.from_numpy(img_tensor), non_blocking=True)
                 self.inputs[1]['tensor'].copy_(torch.from_numpy(scale_factor_tensor), non_blocking=True)
-                
-                if hasattr(self.context, 'execute_async_v3'):
-                    for item in self.inputs + self.outputs:
-                        self.context.set_tensor_address(item['name'], item['ptr'])
-                    self.context.execute_async_v3(self.stream.cuda_stream)
-                else:
-                    self.context.execute_async_v2(bindings=self.bindings, stream_handle=self.stream.cuda_stream)
-                    
             self.stream.synchronize()
-            return [out['tensor'].cpu().numpy() for out in self.outputs]
+            t1 = time.perf_counter()
+
+            if hasattr(self.context, 'execute_async_v3'):
+                for item in self.inputs + self.outputs:
+                    self.context.set_tensor_address(item['name'], item['ptr'])
+                self.context.execute_async_v3(self.stream.cuda_stream)
+            else:
+                self.context.execute_async_v2(bindings=self.bindings, stream_handle=self.stream.cuda_stream)
+            self.stream.synchronize()
+            t2 = time.perf_counter()
+
+            outs = [out['tensor'].cpu().numpy() for out in self.outputs]
+            t3 = time.perf_counter()
+
+            t_h2d = (t1 - t0) * 1000
+            t_gpu = (t2 - t1) * 1000
+            t_d2h = (t3 - t2) * 1000
+
+            if benchmark:
+                return outs, {'h2d': t_h2d, 'gpu': t_gpu, 'd2h': t_d2h}
+            return outs
 
         # ---------------------------------------------------------
         # cuda-python 推論
         # ---------------------------------------------------------
         elif self.backend == 'cuda_python':
             from cuda import cudart
+            t0 = time.perf_counter()
             np.copyto(self.inputs[0]['host'], img_tensor)
             np.copyto(self.inputs[1]['host'], scale_factor_tensor)
             
             for inp in self.inputs:
                 cudart.cudaMemcpyAsync(inp['ptr'], inp['host'].ctypes.data, inp['size'], cudart.cudaMemcpyKind.cudaMemcpyHostToDevice, self.stream)
+            cudart.cudaStreamSynchronize(self.stream)
+            t1 = time.perf_counter()
                 
             if hasattr(self.context, 'execute_async_v3'):
                 for item in self.inputs + self.outputs:
@@ -245,28 +268,47 @@ class TRTEngine:
                 self.context.execute_async_v3(self.stream)
             else:
                 self.context.execute_async_v2(bindings=self.bindings, stream_handle=self.stream)
+            cudart.cudaStreamSynchronize(self.stream)
+            t2 = time.perf_counter()
                 
             for out in self.outputs:
                 cudart.cudaMemcpyAsync(out['host'].ctypes.data, out['ptr'], out['size'], cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost, self.stream)
             cudart.cudaStreamSynchronize(self.stream)
-            return [out['host'].copy() for out in self.outputs]
+            outs = [out['host'].copy() for out in self.outputs]
+            t3 = time.perf_counter()
+
+            if benchmark:
+                return outs, {'h2d': (t1 - t0) * 1000, 'gpu': (t2 - t1) * 1000, 'd2h': (t3 - t2) * 1000}
+            return outs
 
         # ---------------------------------------------------------
         # pycuda 推論
         # ---------------------------------------------------------
         elif self.backend == 'pycuda':
             import pycuda.driver as cuda
+            t0 = time.perf_counter()
             np.copyto(self.inputs[0]['host'], img_tensor.ravel())
             np.copyto(self.inputs[1]['host'], scale_factor_tensor.ravel())
             for item in self.inputs:
                 cuda.memcpy_htod_async(item['dev_mem'], item['host'], self.stream)
+            self.stream.synchronize()
+            t1 = time.perf_counter()
+
             if hasattr(self.context, 'execute_async_v3'):
                 for item in self.inputs + self.outputs:
                     self.context.set_tensor_address(item['name'], item['ptr'])
                 self.context.execute_async_v3(self.stream.handle)
             else:
                 self.context.execute_async_v2(bindings=self.bindings, stream_handle=self.stream.handle)
+            self.stream.synchronize()
+            t2 = time.perf_counter()
+
             for out in self.outputs:
                 cuda.memcpy_dtoh_async(out['host'], out['dev_mem'], self.stream)
             self.stream.synchronize()
-            return [out['host'].reshape(out['shape']) for out in self.outputs]
+            outs = [out['host'].reshape(out['shape']) for out in self.outputs]
+            t3 = time.perf_counter()
+
+            if benchmark:
+                return outs, {'h2d': (t1 - t0) * 1000, 'gpu': (t2 - t1) * 1000, 'd2h': (t3 - t2) * 1000}
+            return outs
