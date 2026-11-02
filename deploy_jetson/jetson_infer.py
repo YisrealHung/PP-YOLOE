@@ -26,6 +26,7 @@ def parse_args():
     parser.add_argument('--iou', type=float, default=0.45, help='NMS IoU threshold (default 0.45)')
     parser.add_argument('--save-dir', type=str, default='outputs', help='Directory to save output images')
     parser.add_argument('--benchmark', action='store_true', help='Print detailed stage-by-stage timing profile')
+    parser.add_argument('--cuda-pre', action='store_true', help='Enable PyTorch GPU accelerated preprocessing (much faster)')
     parser.add_argument('--warmup', type=int, default=3, help='Warmup iterations for accurate benchmark (default 3)')
     return parser.parse_args()
 
@@ -43,7 +44,10 @@ def main():
         img_size = 640
         class_names = []
 
-    print(f"🚀 Loading TensorRT Engine: {args.engine}")
+    # 預處理函式選擇 (CPU vs GPU)
+    preproc_fn = U.preprocess_gpu if (args.cuda_pre and U.BACKEND == 'torch') else U.preprocess
+    pre_mode_name = "PyTorch GPU ⚡" if (args.cuda_pre and U.BACKEND == 'torch') else "CPU (OpenCV/NumPy)"
+    print(f"🚀 Loading TensorRT Engine: {args.engine} (預處理模式: {pre_mode_name})")
     engine = U.TRTEngine(args.engine)
     os.makedirs(args.save_dir, exist_ok=True)
 
@@ -105,7 +109,7 @@ def main():
 
         # 預熱 (Warmup) 消除首次 CUDA Kernel JIT/配置延遲
         if args.warmup > 0:
-            dummy_inp, dummy_sf = U.preprocess(frame, img_size)
+            dummy_inp, dummy_sf = preproc_fn(frame, img_size)
             for _ in range(args.warmup):
                 engine.infer(dummy_inp, dummy_sf)
 
@@ -113,7 +117,7 @@ def main():
 
         # 1. 預處理 (Preprocess: Resize, BGR2RGB, Norm, Transpose)
         t_pre_start = time.perf_counter()
-        inp, sf = U.preprocess(frame, img_size)
+        inp, sf = preproc_fn(frame, img_size)
         t_pre_end = time.perf_counter()
 
         # 2. TensorRT 推論 (包含 Host->Device, GPU Kernel, Device->Host)
@@ -142,7 +146,7 @@ def main():
         dt_total = (t_save_end - t_total_start) * 1000
 
         print(f"\n==================== ⏱️ 耗時細項分析 (Timing Profile) ====================")
-        print(f" 1. 影像預處理 (Preprocess, CPU)      : {dt_pre:6.2f} ms")
+        print(f" 1. 影像預處理 ({pre_mode_name})      : {dt_pre:6.2f} ms")
         print(f" 2. TensorRT 引擎推論 (TRT Total)      : {dt_trt:6.2f} ms")
         print(f"    ├─ 記憶體複製 CPU ➔ GPU (H2D)     : {trt_times['h2d']:6.2f} ms")
         print(f"    ├─ GPU 核心推論 (CUDA Kernel)     : {trt_times['gpu']:6.2f} ms  (純 GPU 計算)")
