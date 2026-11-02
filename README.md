@@ -95,6 +95,8 @@
    解耦 NMS 操作，避免依賴易出錯的自訂 C++ TensorRT Plugin，直接以原生 ONNX 透過原廠 `trtexec` 一鍵轉出高相容性 Engine。
 6. **PyTorch CUDA 零安裝記憶體管理 & GPU 預處理**：
    Jetson Orin 內建 PyTorch 環境，直接利用 `torch.cuda` 管理張量記憶體指標，免除繁瑣的 `pycuda` 安裝與編譯報錯；並透過 `--cuda-pre` 直接在 GPU 完成 Resize 與正規化，徹底釋放 1024 個 CUDA 核心的實力！
+7. **非同步多執行緒取像雙管線 (Async Multi-threaded VideoCapture)**：
+   解決 USB Webcam 阻塞式 I/O 的經典瓶頸。透過背景獨立守護執行緒抓取最新幀，使「相機曝光取像」與「GPU 推論計算」完全重疊並行，徹底消除等待相機交圖的 32ms 空等時間，使串流處理時間直接減半！
 
 ---
 
@@ -160,13 +162,20 @@ bash build_engine.sh
 python3 jetson_infer.py --engine ppyoloe_s.engine --source test.jpg --cuda-pre --save-dir results
 ```
 
-#### 🎥 USB / CSI 即時攝影機串流 (具備 FPS 顯示)
+#### 🎥 USB / CSI 即時攝影機串流 (具備即時畫面與毫秒級細項監控)
 ```bash
-# 桌面模式 (跳出視窗即時預覽)
+# 🖥️ 桌面模式 (跳出視窗即時預覽，左上角顯示 Cam FPS / Algo ms / Draw ms，按 'q' 離開)
 python3 jetson_infer.py --engine ppyoloe_s.engine --source 0 --cuda-pre --show
 
-# 無桌面 (Headless SSH 模式，終端機即時輸出 FPS)
+# 💡 若透過 SSH 遠端連線且 Jetson 接有 HDMI 螢幕，可指定 DISPLAY:
+export DISPLAY=:0
+python3 jetson_infer.py --engine ppyoloe_s.engine --source 0 --cuda-pre --show
+
+# ⚡ 無桌面模式 (Headless SSH 終端機即時輸出毫秒數據與 FPS，無 GUI 開銷)
 python3 jetson_infer.py --engine ppyoloe_s.engine --source 0 --cuda-pre
+
+# ⚙️ 自訂相機規格參數 (預設 640x480 YUYV 30fps，保證無雜訊滿速輸出)
+python3 jetson_infer.py --engine ppyoloe_s.engine --source 0 --cuda-pre --cam-width 640 --cam-height 480 --cam-fps 30
 ```
 
 #### 📁 資料夾批次影像推論
